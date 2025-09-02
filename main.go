@@ -155,8 +155,8 @@ func parseProxiesAdvanced(filename string) ([]*ProxyInfo, error) {
 				Auth:      "",
 				SessionID: fmt.Sprintf("%s:%s", hk, sessionValue),
 				// Anti-signature #69: แต่ละ proxy มี characteristics แตกต่างกัน
-				ProfileIndex: rand.Intn(9),  // 0-8 browser profiles (9 total profiles with matched TLS fingerprints)
-				LangIndex: rand.Intn(5),     // 0-4 accept-language options
+				ProfileIndex: rand.Intn(10),  // 0-9 browser profiles (10 total profiles with matched TLS fingerprints)
+				LangIndex: rand.Intn(13),     // 0-12 accept-language options (13 total)
 				RateFactor: 0.5 + rand.Float64(), // 0.5x - 1.5x rate variation
 				ParamKey: []string{"v","t","_","cache"}[rand.Intn(4)], // Anti-Signature #37: Only standard params
 				TimingProfile: rand.Intn(3), // 0=conservative, 1=moderate, 2=aggressive  
@@ -382,7 +382,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
 				"\"Windows\"", false, false, false,
-				"gzip, deflate, br, zstd",
+				"gzip, deflate, br, zstd",  // CRITICAL: Chrome MUST include 'br' for Brotli
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Windows NT 10.0; Win64; x64",
 				tls.HelloChrome_120,
@@ -402,7 +402,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
 				"\"Google Chrome\";v=\"112\", \"Chromium\";v=\"112\", \"Not=A?Brand\";v=\"24\"",
 				"\"Windows\"", false, false, false,
-				"gzip, deflate, br",
+				"gzip, deflate, br",  // CRITICAL: Chrome MUST include 'br' for Brotli
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Windows NT 10.0; Win64; x64",
 				tls.HelloChrome_112,
@@ -412,7 +412,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
 				"\"Chromium\";v=\"106\", \"Google Chrome\";v=\"106\", \"Not;A=Brand\";v=\"99\"",
 				"\"macOS\"", false, false, false,
-				"gzip, deflate, br",
+				"gzip, deflate, br",  // CRITICAL: Chrome MUST include 'br' for Brotli
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Macintosh; Intel Mac OS X 10_15_7",
 				tls.HelloChrome_106,
@@ -449,7 +449,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
 				"\"Linux\"", false, false, false,
-				"gzip, deflate, br, zstd",
+				"gzip, deflate, br, zstd",  // CRITICAL: Chrome MUST include 'br' for Brotli
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"X11; Linux x86_64",
 				tls.HelloChrome_120,
@@ -459,10 +459,21 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
 				"\"Google Chrome\";v=\"112\", \"Chromium\";v=\"112\", \"Not=A?Brand\";v=\"24\"",
 				"\"Android\"", false, false, false,
-				"gzip, deflate, br",
+				"gzip, deflate, br",  // CRITICAL: Chrome MUST include 'br' for Brotli
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Linux; Android 10",
 				tls.HelloChrome_112,
+			},
+			// Add Edge browser profiles to increase diversity
+			// Edge 120 Windows - matches HelloChrome_120 (Edge uses Chrome engine)
+			{
+				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Microsoft Edge\";v=\"120\"",
+				"\"Windows\"", false, false, true,  // isEdge = true
+				"gzip, deflate, br, zstd",
+				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+				"Windows NT 10.0; Win64; x64",
+				tls.HelloChrome_120,  // Edge uses Chrome TLS
 			},
 		}
 	
@@ -559,76 +570,120 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			
 			// Session consistency - ใช้ User-Agent เดิมถ้าเคยใช้แล้ว (anti-pattern #3)
 			if proxyInfo.LastUserAgent != "" && proxyInfo.RequestCount > 0 {
-				// บางครั้งอาจมี minor updates (เหมือน browser auto-update)
-				if proxyInfo.RequestCount%100 == 0 && rand.Float32() < 0.02 {
-					// 2% chance every 100 requests ของ "browser update"
-					sessionMinutes := int(time.Since(proxyInfo.SessionStartTime).Minutes())
-					if sessionMinutes > 60 { // อย่างน้อย 1 ชม. แล้วถึงจะ update
-						proxyInfo.LastUserAgent = browserProfile.userAgent
-					}
-				}
-				// ใช้ User-Agent เดิมเพื่อ consistency
+				// Find matching profile for stored User-Agent
+				foundProfile := false
 				for i := range browserProfiles {
 					if browserProfiles[i].userAgent == proxyInfo.LastUserAgent {
 						browserProfile = browserProfiles[i]
+						foundProfile = true
 						break
 					}
+				}
+				
+				// If stored UA not found, use current profile but update stored UA
+				if !foundProfile {
+					proxyInfo.LastUserAgent = browserProfile.userAgent
 				}
 			} else {
 				// First request - บันทึก User-Agent ไว้
 				proxyInfo.LastUserAgent = browserProfile.userAgent
 			}
-			// CRITICAL: Store TLS fingerprint to ensure consistency with User-Agent
+			
+			// CRITICAL FIX: ALWAYS store TLS fingerprint that matches the User-Agent
+			// This prevents pattern #6 detection where TLS doesn't match claimed browser
 			proxyInfo.CurrentTLSFingerprint = browserProfile.tlsFingerprint
 		}
 		
-		// Anti-Signature #69: More realistic sec-fetch headers with proper navigation flows
+		// CRITICAL FIX: Realistic sec-fetch headers to avoid pattern #6 detection
 		var secFetchSite, secFetchMode, secFetchUser, secFetchDest string
 		
-		// Realistic browser navigation patterns
-		sessionRequestNumber := int(sessionRequests % 10) // Track within mini-session
-		if sessionRequestNumber == 0 { // First request of session
-			secFetchSite = "none"
+		// Track request number per proxy session for realistic flow
+		var requestNumInSession int
+		if proxyInfo != nil {
+			requestNumInSession = int(proxyInfo.RequestCount % 20)
+		} else {
+			requestNumInSession = int(sessionRequests % 20)
+		}
+		
+		// CRITICAL: First navigation MUST have Sec-Fetch-Site: none
+		if requestNumInSession == 0 { // First request - initial page load
+			secFetchSite = "none"      // MUST be none for initial navigation
 			secFetchMode = "navigate"
 			secFetchUser = "?1"
 			secFetchDest = "document"
-		} else if sessionRequestNumber < 3 { // Early requests (still navigating)
-			if rand.Float32() < 0.7 {
-				secFetchSite = "same-origin"
-			} else {
-				secFetchSite = "same-site"
+		} else if requestNumInSession < 5 { // Early requests - page resources
+			// Resources loaded from same origin (CSS, JS, images)
+			secFetchSite = "same-origin" // Resources from same domain
+			
+			// Determine resource type
+			resourceTypes := []struct{
+				mode string
+				dest string
+				user string
+				weight float32
+			}{
+				{"no-cors", "script", "?0", 0.3},  // JS files
+				{"no-cors", "style", "?0", 0.25},  // CSS files
+				{"no-cors", "image", "?0", 0.25},  // Images
+				{"cors", "empty", "?0", 0.15},     // AJAX/Fetch
+				{"navigate", "iframe", "?1", 0.05}, // Iframes
 			}
-			secFetchMode = "navigate"
-			secFetchUser = "?1"
-			secFetchDest = "document"
-		} else { // Later requests (resources, AJAX)
-			sites := []string{"same-origin", "same-site", "cross-site"}
-			weights := []float32{0.6, 0.3, 0.1} // Most requests are same-origin
+			
 			rnd := rand.Float32()
-			if rnd < weights[0] {
-				secFetchSite = sites[0]
-			} else if rnd < weights[0]+weights[1] {
-				secFetchSite = sites[1]
-			} else {
-				secFetchSite = sites[2]
+			var cumWeight float32 = 0
+			for _, rt := range resourceTypes {
+				cumWeight += rt.weight
+				if rnd < cumWeight {
+					secFetchMode = rt.mode
+					secFetchDest = rt.dest
+					secFetchUser = rt.user
+					break
+				}
+			}
+		} else { // Later requests - mixed behavior
+			// Realistic site values for established session
+			siteProbs := []struct{
+				site string
+				weight float32
+			}{
+				{"same-origin", 0.7},  // Most requests stay on same domain
+				{"same-site", 0.2},    // Some subdomain/cookie sharing
+				{"cross-site", 0.1},   // External resources (CDN, analytics)
 			}
 			
-			modes := []string{"cors", "no-cors", "navigate"}
-			modeWeights := []float32{0.5, 0.3, 0.2} // Most AJAX requests are cors
-			rnd = rand.Float32()
-			if rnd < modeWeights[0] {
-				secFetchMode = modes[0]
-				secFetchUser = "?0"
-			} else if rnd < modeWeights[0]+modeWeights[1] {
-				secFetchMode = modes[1] 
-				secFetchUser = "?0"
-			} else {
-				secFetchMode = modes[2]
-				secFetchUser = "?1"
+			rnd := rand.Float32()
+			var cumWeight float32 = 0
+			for _, sp := range siteProbs {
+				cumWeight += sp.weight
+				if rnd < cumWeight {
+					secFetchSite = sp.site
+					break
+				}
 			}
 			
-			destinations := []string{"empty", "document", "iframe", "image", "script"}
-			secFetchDest = destinations[rand.Intn(len(destinations))]
+			// Mode based on site
+			if secFetchSite == "cross-site" {
+				// Cross-site is usually no-cors for resources
+				secFetchMode = "no-cors"
+				secFetchUser = "?0"
+				secFetchDest = "script" // Often external JS
+			} else {
+				// Same-origin/same-site mixed behavior
+				if rand.Float32() < 0.6 {
+					secFetchMode = "cors"
+					secFetchUser = "?0"
+					secFetchDest = "empty" // AJAX
+				} else if rand.Float32() < 0.8 {
+					secFetchMode = "no-cors"
+					secFetchUser = "?0"
+					dests := []string{"image", "script", "style"}
+					secFetchDest = dests[rand.Intn(len(dests))]
+				} else {
+					secFetchMode = "navigate"
+					secFetchUser = "?1"
+					secFetchDest = "document" // Navigation to new page
+				}
+			}
 		}
 		
 		// Dynamic path with randomization
@@ -714,15 +769,37 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			{":path", path},
 		}
 		
-		// เพิ่ม Chrome-specific headers (เฉพาะเมื่อไม่ใช่ Firefox)
-		if !browserProfile.isFirefox {
-			h2_headers = append(h2_headers, [2]string{"sec-ch-ua", browserProfile.secChUA})
+		// CRITICAL FIX: Add Chrome Client Hints headers to avoid pattern #6 detection
+		// Chrome/Edge MUST have these headers or will be flagged as fake
+		if !browserProfile.isFirefox && !browserProfile.isSafari {
+			// Validate sec-ch-ua is not empty
+			if browserProfile.secChUA != "" {
+				h2_headers = append(h2_headers, [2]string{"sec-ch-ua", browserProfile.secChUA})
+			} else {
+				// Fallback for Chrome 120 if empty
+				h2_headers = append(h2_headers, [2]string{"sec-ch-ua", `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`})
+			}
 			h2_headers = append(h2_headers, [2]string{"sec-ch-ua-mobile", "?0"})
-			h2_headers = append(h2_headers, [2]string{"sec-ch-ua-platform", browserProfile.secChUAPlatform})
+			
+			// Validate platform is not empty
+			if browserProfile.secChUAPlatform != "" {
+				h2_headers = append(h2_headers, [2]string{"sec-ch-ua-platform", browserProfile.secChUAPlatform})
+			} else {
+				// Fallback based on User-Agent
+				if strings.Contains(browserProfile.userAgent, "Windows") {
+					h2_headers = append(h2_headers, [2]string{"sec-ch-ua-platform", `"Windows"`})
+				} else if strings.Contains(browserProfile.userAgent, "Mac") {
+					h2_headers = append(h2_headers, [2]string{"sec-ch-ua-platform", `"macOS"`})
+				} else {
+					h2_headers = append(h2_headers, [2]string{"sec-ch-ua-platform", `"Linux"`})
+				}
+			}
 		}
 		
-		// Anti-Signature #37: Standard browser headers in correct order (avoid detection)
-		// CRITICAL: Ensure ALL headers have proper values and NO empty headers
+		// CRITICAL FIX: Headers MUST be in correct browser order to avoid pattern #6 detection
+		// Chrome/Edge order: upgrade-insecure-requests, user-agent, accept, sec-fetch-*, accept-encoding, accept-language
+		
+		// Validate and prepare User-Agent
 		userAgent := browserProfile.userAgent
 		if userAgent == "" {
 			// Fallback to standard Chrome User-Agent if empty
@@ -735,14 +812,15 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 		}
 		
-		// Add standard headers in typical browser order
-		upgradeInsecureProb := float32(0.9) // Most modern browsers send this
-		if rand.Float32() < upgradeInsecureProb {
+		// 1. Upgrade-Insecure-Requests (sent by most browsers for document requests)
+		if secFetchDest == "document" {
 			h2_headers = append(h2_headers, [2]string{"upgrade-insecure-requests", "1"})
 		}
+		
+		// 2. User-Agent
 		h2_headers = append(h2_headers, [2]string{"user-agent", userAgent})
 		
-		// CRITICAL: Ensure accept header is never empty or suspicious
+		// 3. Accept
 		acceptValue := browserProfile.acceptValue
 		if acceptValue == "" || strings.Contains(acceptValue, "/dev/null") {
 			// Use standard accept value
@@ -750,15 +828,16 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		h2_headers = append(h2_headers, [2]string{"accept", acceptValue})
 		
-		// Sec-Fetch headers (เฉพาะ Chrome/Chromium/Edge)
+		// CRITICAL FIX: Sec-Fetch headers for Chrome/Edge (required to avoid detection)
 		if !browserProfile.isFirefox && !browserProfile.isSafari {
+			// Chrome/Edge always send these in specific order
 			h2_headers = append(h2_headers, [2]string{"sec-fetch-site", secFetchSite})
 			h2_headers = append(h2_headers, [2]string{"sec-fetch-mode", secFetchMode})
 			h2_headers = append(h2_headers, [2]string{"sec-fetch-user", secFetchUser})
 			h2_headers = append(h2_headers, [2]string{"sec-fetch-dest", secFetchDest})
 		}
 		
-		// Accept-Encoding ที่แม่นยำตาม browser
+		// 4. Accept-Encoding (after sec-fetch-* for Chrome)
 		// CRITICAL: Ensure accept-encoding is never empty or suspicious
 		acceptEncoding := browserProfile.acceptEncoding
 		if acceptEncoding == "" {
@@ -766,99 +845,48 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		h2_headers = append(h2_headers, [2]string{"accept-encoding", acceptEncoding})
 		
-		// Safari-specific headers
-		if browserProfile.isSafari {
-			// Safari has lower probability of upgrade-insecure-requests in HTTPS
-			if scheme == "https" {
-				// Remove upgrade-insecure-requests for Safari HTTPS (they send it less often)
-				for i, header := range h2_headers {
-					if header[0] == "upgrade-insecure-requests" {
-						// Safari only sends this about 60% of the time
-						if rand.Float32() > 0.6 {
-							h2_headers = append(h2_headers[:i], h2_headers[i+1:]...)
-						}
-						break
-					}
-				}
-			}
-		}
-		
-		// Edge-specific tweaks
-		if browserProfile.isEdge {
-			// Edge มี sec-ch-ua-mobile บางครั้ง
-			if rand.Float32() < 0.8 {
-				h2_headers = append(h2_headers, [2]string{"sec-ch-ua-mobile", "?0"})
-			}
-		}
-		
+		// 5. Accept-Language
 		// CRITICAL: Ensure accept-language is never empty
 		if acceptLang == "" {
 			acceptLang = "en-US,en;q=0.9"
 		}
 		h2_headers = append(h2_headers, [2]string{"accept-language", acceptLang})
 		
-		// Anti-Signature #69: Enhanced header patterns with realistic browser behavior
+		// 6. Additional headers based on request type and browser behavior
 		
-		// Realistic header probability distributions (based on real browser stats)
-		dntProb := float32(0.15) // DNT is less common now
-		cacheControlProb := float32(0.05) // Cache-Control is rare in normal browsing
-		refererProb := float32(0.85) // Most requests have referrer
-		
-		if proxyInfo != nil {
-			// ปรับความน่าจะเป็นตาม TimingProfile
-			switch proxyInfo.TimingProfile {
-			case 0: // Conservative users มักมี DNT และ cache-control มากกว่า
-				dntProb = 0.5
-				cacheControlProb = 0.2
-			case 1: // Moderate users - ค่าปกติ
-				// ใช้ค่าเริ่มต้น
-			case 2: // Aggressive users มักไม่สน privacy headers
-				dntProb = 0.1
-				refererProb = 0.9 // แต่มักมี referer
-			}
+		// Cache-Control (rare, only for reload)
+		if secFetchMode == "navigate" && rand.Float32() < 0.05 {
+			h2_headers = append(h2_headers, [2]string{"cache-control", "max-age=0"})
 		}
 		
-		// Anti-Signature #37: Only standard browser headers (avoid unusual headers)
-		// NOTE: In HTTP/2, Connection header should NOT be sent (it's connection-specific)
-		// Remove Connection header for HTTP/2 to avoid detection
-		
-		if rand.Float32() < dntProb {
-			h2_headers = append(h2_headers, [2]string{"dnt", "1"})
-		}
-		
-		// Standard Cache-Control (only when legitimate)
-		if rand.Float32() < cacheControlProb {
-			// Use only standard cache-control values
-			standardCacheControls := []string{"max-age=0", "no-cache"}
-			h2_headers = append(h2_headers, [2]string{"cache-control", standardCacheControls[rand.Intn(len(standardCacheControls))]})
-		}
-		
-		// Realistic Referer patterns based on navigation type
-		if secFetchSite != "none" && rand.Float32() < refererProb {
+		// Referer header (most requests have it except initial navigation)
+		if secFetchSite != "none" && rand.Float32() < 0.85 {
 			var refererValue string
-			if secFetchMode == "navigate" {
-				// Navigation requests - referer from search engines or direct
-				navReferers := []string{
+			if secFetchSite == "same-origin" {
+				// Same origin referer
+				refererValue = fmt.Sprintf("%s://%s/", scheme, authority)
+			} else if secFetchSite == "same-site" {
+				// Same site (could be subdomain)
+				refererValue = fmt.Sprintf("%s://%s/", scheme, authority)
+			} else if secFetchSite == "cross-site" && secFetchMode == "navigate" {
+				// Navigation from search engine
+				searchEngines := []string{
 					"https://www.google.com/",
 					"https://www.bing.com/",
-					fmt.Sprintf("%s://%s/", scheme, authority),
-					fmt.Sprintf("%s://%s/index.html", scheme, authority),
+					"https://duckduckgo.com/",
 				}
-				refererValue = navReferers[rand.Intn(len(navReferers))]
-			} else {
-				// Resource requests - referer from same site
-				resourceReferers := []string{
-					fmt.Sprintf("%s://%s/", scheme, authority),
-					fmt.Sprintf("%s://%s/index.html", scheme, authority),
-					fmt.Sprintf("%s://%s/page", scheme, authority),
-					fmt.Sprintf("%s://%s/home", scheme, authority),
-				}
-				refererValue = resourceReferers[rand.Intn(len(resourceReferers))]
+				refererValue = searchEngines[rand.Intn(len(searchEngines))]
 			}
-			// CRITICAL: Ensure referer doesn't contain suspicious characters
-			if !strings.ContainsAny(refererValue, "<>\"';&#") {
+			
+			// Only add referer if we have a valid value
+			if refererValue != "" && !strings.ContainsAny(refererValue, "<>\"';&#") {
 				h2_headers = append(h2_headers, [2]string{"referer", refererValue})
 			}
+		}
+		
+		// DNT header (less common now, only ~15% of users)
+		if rand.Float32() < 0.15 {
+			h2_headers = append(h2_headers, [2]string{"dnt", "1"})
 		}
 		
 		// Anti-Signature #37: Standard cookie management (use only legitimate cookies)
@@ -908,21 +936,8 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			h2_headers = append(h2_headers, [2]string{"cookie", cookieHeader})
 		}
 		
-		// Anti-Signature #37: Remove custom session headers that trigger detection
-		// Real browsers don't typically send custom x-* headers for regular browsing
-		// We'll rely on standard cookies and browser headers instead
-		
-		// Anti-Signature #37: Add priority header for HTTP/2 (browsers send this)
-		// This is a standard HTTP/2 header that real browsers send
-		h2_headers = append(h2_headers, [2]string{"priority", "u=0, i"})
-		
-		// Anti-Signature #37: Remove x-requested-with header entirely
-		// This header is often flagged as suspicious when not from actual AJAX
-		// Better to not send it at all to avoid detection
-		
-		// Anti-Signature #37: Remove non-standard viewport headers
-		// Real browsers don't send viewport-width headers in HTTP requests
-		// This information is handled via CSS media queries, not HTTP headers
+		// Cookie header should be added last (after all other headers)
+		// This is moved to after DNT header for proper ordering
 		
 		// จำลองการ retry ของเบราว์เซอร์จริง (เพื่อหลีกเลี่ยง Pattern #4)
 		var conn net.Conn
@@ -1639,7 +1654,7 @@ func main() {
 			Addr:      proxyIP,
 			Auth:      "",
 			SessionID: fmt.Sprintf("%s:%s", genRandStr(5), genRandStr(8)),
-			ProfileIndex: rand.Intn(9), // 0-8 to match 9 browser profiles
+			ProfileIndex: rand.Intn(10), // 0-9 to match 10 browser profiles
 			LangIndex: rand.Intn(13), // 0-12 to match 13 accept-language options
 			SessionStartTime: time.Now(),
 		}
