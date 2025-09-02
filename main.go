@@ -539,7 +539,9 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		
 		// Anti-Signature #69: Generate realistic headers with proper proxy consistency
 		browserProfile := browserProfiles[rand.Intn(len(browserProfiles))]
-		fmt.Printf("[DEBUG] Initial browser profile selected: %s\n", browserProfile.userAgent)
+		if debugmode > 0 {
+			fmt.Printf("[DEBUG] Initial browser profile selected: %s\n", browserProfile.userAgent)
+		}
 		acceptLang := acceptLanguages[rand.Intn(len(acceptLanguages))]
 		
 		// Platform consistency check - ensure User-Agent matches Accept-Language geography
@@ -563,18 +565,24 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		
 		// Override ด้วย proxy-specific attributes เพื่อสร้างความสอดคล้องใน proxy แต่หลากหลายระหว่าง proxy
 		if proxyInfo != nil {
-			fmt.Printf("[DEBUG] Proxy override - ProfileIndex: %d, RequestCount: %d\n", proxyInfo.ProfileIndex, proxyInfo.RequestCount)
+			if debugmode > 0 {
+				fmt.Printf("[DEBUG] Proxy override - ProfileIndex: %d, RequestCount: %d\n", proxyInfo.ProfileIndex, proxyInfo.RequestCount)
+			}
 			
 			if rotateUserAgent {
 				// When rotation is enabled, select a random profile instead of using fixed ProfileIndex
 				profileIdx := rand.Intn(len(browserProfiles))
 				browserProfile = browserProfiles[profileIdx]
-				fmt.Printf("[DEBUG] Random profile selected (rotation enabled): %s\n", browserProfile.userAgent)
+				if debugmode > 0 {
+					fmt.Printf("[DEBUG] Random profile selected (rotation enabled): %s\n", browserProfile.userAgent)
+				}
 			} else {
 				// ใช้ modulo เพื่อให้ ProfileIndex อยู่ในช่วงที่ถูกต้อง
 				profileIdx := proxyInfo.ProfileIndex % len(browserProfiles)
 				browserProfile = browserProfiles[profileIdx]
-				fmt.Printf("[DEBUG] Proxy profile selected: %s\n", browserProfile.userAgent)
+				if debugmode > 0 {
+					fmt.Printf("[DEBUG] Proxy profile selected: %s\n", browserProfile.userAgent)
+				}
 			}
 			
 			langIdx := proxyInfo.LangIndex % len(acceptLanguages)
@@ -582,7 +590,9 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			
 			// Session consistency - ใช้ User-Agent เดิมถ้าเคยใช้แล้ว (anti-pattern #3)
 			if !rotateUserAgent && proxyInfo.LastUserAgent != "" && proxyInfo.RequestCount > 0 {
-				fmt.Printf("[DEBUG] Session consistency - Using previous User-Agent: %s\n", proxyInfo.LastUserAgent)
+				if debugmode > 0 {
+					fmt.Printf("[DEBUG] Session consistency - Using previous User-Agent: %s\n", proxyInfo.LastUserAgent)
+				}
 				// Find matching profile for stored User-Agent
 				foundProfile := false
 				for i := range browserProfiles {
@@ -600,7 +610,9 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			} else {
 				// First request or rotation enabled - บันทึก User-Agent ไว้
 				if rotateUserAgent {
-					fmt.Printf("[DEBUG] User-Agent rotation enabled - Using new User-Agent\n")
+					if debugmode > 0 {
+						fmt.Printf("[DEBUG] User-Agent rotation enabled - Using new User-Agent\n")
+					}
 				}
 				proxyInfo.LastUserAgent = browserProfile.userAgent
 			}
@@ -834,7 +846,9 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		
 		// 2. User-Agent
-		fmt.Printf("[DEBUG] Selected User-Agent: %s\n", userAgent)
+		if debugmode > 0 {
+			fmt.Printf("[DEBUG] Selected User-Agent: %s\n", userAgent)
+		}
 		h2_headers = append(h2_headers, [2]string{"user-agent", userAgent})
 		
 		// 3. Accept
