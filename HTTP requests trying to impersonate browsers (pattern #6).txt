@@ -1,0 +1,153 @@
+การตรวจสอบ Pattern #6 “การปลอมแปลงเป็นเบราว์เซอร์” ของ Cloudflare
+
+Cloudflare ใช้กฎเฉพาะในระบบ HTTP DDoS Managed Rules เพื่อตรวจจับคำขอที่ ปลอมตัวเป็นเบราว์เซอร์ (Pattern #6)
+developers.cloudflare.com
+. ตามรายงานของ Cloudflare ในไตรมาส 2 ปี 2024 พบว่าราว 29% ของการโจมตี HTTP DDoS ใช้ User-Agent ปลอมเพื่อแอบอ้างเป็นเบราว์เซอร์ (หรือ headless browser)
+blog.cloudflare.com
+. ในไตรมาสก่อนหน้านั้น ยังพบอีกประมาณ 9% ของการโจมตีที่มาจากการปลอมแปลงเบราว์เซอร์
+noise.getoto.net
+. นั่นแสดงว่าผู้โจมตีส่วนหนึ่งพยายามใช้ UA ปลอมเพื่อหลบเลี่ยงการตรวจจับ จึงจำเป็นที่ Cloudflare จะวิเคราะห์ความผิดปกติของส่วนหัว (HTTP headers) และพฤติกรรมโดยรวมเพื่อแยกแยะระหว่างผู้ใช้จริงกับบอทที่ปลอมตัว.
+
+การตรวจสอบความผิดปกติของ HTTP Headers
+
+Cloudflare วิเคราะห์ ส่วนหัว HTTP ต่างๆ เพื่อหาความไม่สอดคล้องกันเมื่อเทียบกับ User-Agent ที่ระบุไว้ โดยพิจารณาจากลักษณะปกติของเบราว์เซอร์จริง ตัวอย่างเช่น:
+
+Accept-Language: เบราว์เซอร์จริงจะส่งภาษาตามการตั้งค่าผู้ใช้ เช่น Accept-Language: en-US,en;q=0.5
+zenrows.com
+. หาก UA ระบุเป็น Chrome หรือ Firefox แต่ header นี้หายไปหรือมีค่าน่าสงสัย (เช่น */* แทน) ก็จะเป็นสัญญาณบ่งชี้ว่าผู้ส่งไม่ใช่เบราว์เซอร์ปกติ
+zenrows.com
+.
+
+Accept-Encoding: UA ยอดนิยมอย่าง Chrome/Edge มักใส่ค่า br (Brotli) ใน Accept-Encoding: gzip, deflate, br
+zenrows.com
+. หาก UA บอกว่าเป็น Chrome แต่ไม่มี br ใน Accept-Encoding คำขออาจถูกตีตราว่าไม่เหมาะสม.
+
+Sec-Fetch-*: เบราว์เซอร์สมัยใหม่จะแนบ header ชุด Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site, Sec-Fetch-User เสมอ เช่น การโหลดหน้าเว็บปกติจะมี Sec-Fetch-Site: none (เพราะเป็น navigation ชั้นบน) และ Sec-Fetch-Mode: navigate
+zenrows.com
+. ตัวอย่างในภาพด้านล่างคือคำขอที่ถูกปิดกั้น เพราะ Sec-Fetch-Site เป็น cross-site (ไม่ตรงตามค่านิยมปกติของ navigation)
+stackoverflow.com
+:
+
+GET /... HTTP/2
+Host: www.violetgrey.com
+User-Agent: Mozilla/5.0 (X11; NetBSD amd64; rv:16.0) Gecko/20121102 Firefox/16.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: cross-site
+Sec-Fetch-User: ?1
+
+
+(ตัวอย่างคำขอที่ Cloudflare ระบุว่าไม่สอดคล้องกับเบราว์เซอร์จริง
+stackoverflow.com
+)
+
+Sec-CH-UA และ Sec-GPC: เบราว์เซอร์รุ่นใหม่ (เช่น Chrome/Edge) จะส่ง Client Hints อย่าง Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Platform และ Sec-GPC อยู่เสมอ
+zenrows.com
+. บอทหรือ curl ทั่วไปมักละเว้น header เหล่านี้ไป ส่งผลให้ Cloudflare สามารถแยกแยะได้ว่าเป็นทราฟฟิกผิดปกติ.
+
+User-Agent ปลอม vs Accept: หาก User-Agent ระบุเป็นเบราว์เซอร์ยอดนิยม แต่ค่าของ header อื่นๆ ไม่สอดคล้องกับรุ่นนั้นๆ (เช่น UA บอก Firefox แต่ Accept/encoding/value ต่างจากที่ Firefox ปกติส่ง) ก็จะยิ่งเพิ่มความน่าจะเป็นว่าคำขอนั้นเป็นการปลอมแปลง. ตัวอย่าง thesis ระบุว่า “การปลอมตัวเป็นเบราว์เซอร์ Webshell จะปลอม User-Agent และ copy header เช่น Accept, charset encoding ฯลฯ ให้เหมือนเบราว์เซอร์จริง”
+uet.vnu.edu.vn
+. ดังนั้นหากการจัดเรียงหรือค่าใน header ต่างไปจากบรรทัดฐาน Cloudflare ก็จะจับผิดได้.
+
+เปรียบเทียบกับพฤติกรรมของเบราว์เซอร์จริง
+
+Cloudflare เปรียบเทียบรูปแบบของ HTTP headers กับพฤติกรรมจริงที่คาดหวังสำหรับ User-Agent นั้นๆ. ตัวอย่างเช่น คำขอจาก Chrome บน Windows ปกติจะมี header ประมาณนี้ (จากการทดสอบผ่าน httpbin)
+zenrows.com
+:
+
+{
+  "Accept": ["text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"],
+  "Accept-Encoding": ["gzip, deflate, br, zstd"],
+  "Accept-Language": ["en-US,en;q=0.5"],
+  "Sec-Fetch-Dest": ["document"],
+  "Sec-Fetch-Mode": ["navigate"],
+  "Sec-Fetch-Site": ["none"],
+  "Sec-Fetch-User": ["?1"],
+  "Upgrade-Insecure-Requests": ["1"],
+  "User-Agent": ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/... Chrome/128.0.0.0 Safari/537.36"]
+}
+
+
+Cloudflare ใช้แบบจำลองหรือเงื่อนไข (heuristics) เหล่านี้ในการวิเคราะห์ หากพบว่าคำขอไม่ตรงกับโปรไฟล์เบราว์เซอร์ที่อ้าง (เช่น Chrome ควรใส่ Accept-Encoding: ... br แต่คำขอไม่มี) ก็จะระบุเป็นคำขอผิดปกติ. กล่าวอีกนัยหนึ่ง หาก UA กำหนดว่าต้องเป็นเบราว์เซอร์ แต่ลักษณะของ headers แสดงถึงเครื่องมืออื่น (เช่น ไม่มีกฎของ “การเลื่อนหน้าด้วย browser” เช่น Sec-Fetch ผิดรูปแบบ) ระบบจะจับผิดได้.
+
+ตัวอย่าง pseudo-code สำหรับกฎตรวจจับ
+
+ตัวอย่างโค้ดหรือเงื่อนไขสำหรับกฎ WAF/Cloudflare ที่ตรวจจับพฤติกรรมนี้ อาจเขียนได้ดังนี้ (pseudo-code):
+
+if http.request.headers["User-Agent"] contains "Chrome" or "Mozilla/5.0":
+    # ตรวจสอบ header สำคัญของ Chrome
+    if not http.request.headers.contains("Accept-Language"):
+        flag_as_browser_impersonator
+    if "br" not in http.request.headers["Accept-Encoding"]:
+        flag_as_browser_impersonator
+    if http.request.headers["Sec-Fetch-Site"] != "none":
+        flag_as_browser_impersonator
+    if not http.request.headers.contains("Sec-Fetch-Mode"):
+        flag_as_browser_impersonator
+    # เพิ่มเติม: ตรวจสอบ Sec-CH-UA, Sec-GPC ฯลฯ
+    if not http.request.headers.contains("Sec-CH-UA"):
+        flag_as_browser_impersonator
+# เป็นต้น
+
+
+หรือในรูปแบบ Cloudflare WAF Expression (สมมติ):
+
+(http.user_agent contains "Chrome" and (
+    not http.request.headers["Accept-Language"] 
+    or http.request.headers["Accept-Encoding"] not contains "br" 
+    or http.request.headers["Sec-Fetch-Site"] ne "none"
+))
+⇒ block
+
+
+เงื่อนไขเหล่านี้สาธิตแนวคิดว่าหาก User-Agent ระบุเป็นเบราว์เซอร์ แต่ขาดค่า header ปกติ เช่น ไม่มี Accept-Language หรือค่า Sec-Fetch-Site ไม่ตรง (ควรเป็น none สำหรับ navigation ชั้นบน) ก็ควรระบุว่าเป็น traffic ที่อาจปลอมตัวมา. นักพัฒนาสามารถปรับเงื่อนไขให้เข้มงวดขึ้น เช่น ตรวจสอบลำดับหรือรูปแบบที่เฉพาะเจาะจงของ header ด้วย.
+
+ตัวอย่าง HTTP Request ที่ Cloudflare พิจารณาว่าเป็นปลอม UA
+
+ด้านล่างเป็นตัวอย่างคำขอ HTTP/2 ที่พยายามเลียนแบบ Firefox แต่ถูก Cloudflare บล็อก
+stackoverflow.com
+:
+
+GET /en-us/shopping/the-rich-cream-18105401 HTTP/2
+Host: www.violetgrey.com
+User-Agent: Mozilla/5.0 (X11; NetBSD amd64; rv:16.0) Gecko/20121102 Firefox/16.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br
+DNT: 1
+Connection: keep-alive
+Upgrade-Insecure-Requests: 1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: cross-site
+Sec-Fetch-User: ?1
+
+
+แม้คำขอจะใส่ header เหมือน Firefox แต่การมี Sec-Fetch-Site: cross-site (ควรเป็น none ในกรณีการโหลดหน้าแบบปกติ) ทำให้ Cloudflare พบความผิดปกติ
+stackoverflow.com
+ และตอบกลับด้วยโค้ด 1020 ห้าม. ตัวอย่างนี้เน้นให้เห็นว่าแม้จะพยายามเลียนแบบซับซ้อน หากค่าใดผิดที่ผิดทางเพียงอย่างเดียว Cloudflare ก็จะจับได้.
+
+บทบาทของ TLS Fingerprint (JA3/JA4)
+
+นอกจากการวิเคราะห์ HTTP headers แล้ว Cloudflare ยังใช้การ Fingerprint TLS (อย่าง JA3 และ JA4) เพื่อตรวจสอบความสอดคล้องกับ User-Agent. ระบบจะดูว่า TLS ClientHello ที่เครื่องลูกค้าส่งมา ตรงกับที่เบราว์เซอร์ที่อ้างควรจะส่งหรือไม่
+stackoverflow.com
+. หาก ClientHello แสดงรายการ cipher suites หรือ extensions ไม่ตรงกับค่าเฉพาะของ UA นั้น (เช่น Curl หรือ Python library จะมี TLS handshake ที่ต่างจาก Chrome จริง) Cloudflare จะบล็อกคำขอ. ดังที่ผู้เชี่ยวชาญให้ข้อมูลว่า “Cloudflare profiles และ fingerprints เบราว์เซอร์ เช่น หากการ handshake ของ curl ไม่เหมือนกับเบราว์เซอร์ที่ User-Agent ระบุไว้ ก็จะโดน 403”
+stackoverflow.com
+.
+
+ทั้งนี้ การใช้งาน JA3 อย่างเดียวมีข้อจำกัด เนื่องจาก Google ได้เปลี่ยนพฤติกรรม TLS ของ Chrome โดยสลับลำดับ extension ใน ClientHello ทำให้ fingerprint เดิม (JA3) เปลี่ยนแปลงได้ง่าย
+blog.cloudflare.com
+. Cloudflare จึงนำ JA4 fingerprint ใหม่มาใช้ ซึ่งเรียงลำดับ extensions อย่างมั่นคงและรองรับโปรโตคอลสมัยใหม่
+blog.cloudflare.com
+. ผลคือ Cloudflare สามารถตรวจสอบได้แม่นยำขึ้นว่าลายเซ็น TLS (JA3/JA4) สอดคล้องกับเบราว์เซอร์ที่อ้างจริงหรือไม่. เมื่อ JA3/JA4 ไม่ตรงกับ UA ที่ส่งมา เช่น UA เป็น Chrome แต่ fingerprint เป็น Python ร่วมกับไลบรารีเก่า ระบบจะถือว่าผิดปกติและมีโอกาสสูงว่าเป็นบอทที่ปลอม UA
+stackoverflow.com
+blog.cloudflare.com
+.
+
+สรุป: Cloudflare Pattern #6 ใช้วิธีวิเคราะห์ความสอดคล้องของ HTTP headers และ TLS fingerprint เพื่อแยกแยะคำขอที่ปลอมตัวเป็นเบราว์เซอร์ โดยเปรียบเทียบชุด header ที่ได้รับกับโปรไฟล์เบราว์เซอร์ที่คาดหวัง ถ้าพบความผิดปกติ (เช่น header หายไปผิดที่ หรือลายเซ็น TLS ไม่ตรงกับ UA) ก็จะถูกจัดว่าเป็นพฤติกรรมผิดปกติและถูกบล็อก
+zenrows.com
+stackoverflow.com
+. เทคนิคนี้ช่วยให้ Cloudflare สามารถแยกบอทที่พยายามเลียนแบบผู้ใช้จริงออกจากทราฟฟิกปกติได้อย่างมีประสิทธิภาพ.
