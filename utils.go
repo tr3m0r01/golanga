@@ -65,19 +65,31 @@ func GenerateRealisticSessionID() string {
 	patterns := []func() string{
 		// Standard alphanumeric session (most common)
 		func() string {
-			return RandomString(32) // Simple 32-char session
-		},
-		// Timestamp + random (common for cache busting)
-		func() string {
-			return fmt.Sprintf("%d%s", time.Now().Unix(), RandomString(8))
+			// Use only alphanumeric characters to avoid suspicious patterns
+			const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+			var sb strings.Builder
+			for i := 0; i < 32; i++ {
+				sb.WriteByte(charset[rand.Intn(len(charset))])
+			}
+			return sb.String()
 		},
 		// Simple hex token (PHP/ASP.NET style)
 		func() string {
-			return fmt.Sprintf("%x", time.Now().UnixNano()) + RandomString(16)
+			const hexChars = "0123456789abcdef"
+			var sb strings.Builder
+			for i := 0; i < 32; i++ {
+				sb.WriteByte(hexChars[rand.Intn(len(hexChars))])
+			}
+			return sb.String()
 		},
 		// Standard web session format
 		func() string {
-			return RandomString(24)
+			const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+			var sb strings.Builder
+			for i := 0; i < 24; i++ {
+				sb.WriteByte(charset[rand.Intn(len(charset))])
+			}
+			return sb.String()
 		},
 	}
 	pattern := patterns[rand.Intn(len(patterns))]
@@ -86,6 +98,11 @@ func GenerateRealisticSessionID() string {
 
 // Anti-Signature #37: Generate standard cache-busting parameters (avoid unusual patterns)
 func GenerateCacheBuster(key string) string {
+	// Validate key doesn't contain suspicious characters
+	if strings.ContainsAny(key, "<>\"';&=#") {
+		key = "t" // Use safe default
+	}
+	
 	// Use only standard cache-busting strategies
 	strategies := []func(string) string{
 		// Unix timestamp (most common and legitimate)
@@ -94,7 +111,7 @@ func GenerateCacheBuster(key string) string {
 		},
 		// Version number (common for assets)
 		func(k string) string {
-			return fmt.Sprintf("%s=%d.%d", k, rand.Intn(10)+1, rand.Intn(100))
+			return fmt.Sprintf("%s=%d", k, rand.Intn(999)+1)
 		},
 		// Simple number (common for pagination/versions)
 		func(k string) string {
@@ -202,19 +219,44 @@ func UpdateCookies(initial_cookies map[string]Cookie, new_cookies []Cookie) map[
 
 // Anti-Signature #37: Generate standard browser cookie values (avoid suspicious patterns)
 func GenerateRealisticCookieValue(cookieName string) string {
+	// Ensure cookie name doesn't contain suspicious characters
+	if strings.ContainsAny(cookieName, "<>\"';&=") {
+		return "" // Return empty if suspicious
+	}
+	
 	switch strings.ToLower(cookieName) {
 	case "jsessionid":
-		// Standard Java session ID pattern
-		return RandomString(32) + "." + RandomString(8)
+		// Standard Java session ID pattern (alphanumeric only)
+		const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		var sb strings.Builder
+		for i := 0; i < 32; i++ {
+			sb.WriteByte(charset[rand.Intn(len(charset))])
+		}
+		return sb.String()
 	case "phpsessid":
-		// Standard PHP session ID pattern
-		return RandomString(26) // PHP default length
-	case "aspsessionid":
+		// Standard PHP session ID pattern (lowercase alphanumeric)
+		const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+		var sb strings.Builder
+		for i := 0; i < 26; i++ {
+			sb.WriteByte(charset[rand.Intn(len(charset))])
+		}
+		return sb.String()
+	case "asp.net_sessionid":
 		// ASP.NET session ID pattern
-		return RandomString(24)
-	case "_csrf", "csrf_token":
+		const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+		var sb strings.Builder
+		for i := 0; i < 24; i++ {
+			sb.WriteByte(charset[rand.Intn(len(charset))])
+		}
+		return sb.String()
+	case "_csrf", "csrf_token", "_token":
 		// Standard CSRF token
-		return RandomString(32)
+		const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		var sb strings.Builder
+		for i := 0; i < 32; i++ {
+			sb.WriteByte(charset[rand.Intn(len(charset))])
+		}
+		return sb.String()
 	case "_ga":
 		// Google Analytics (standard format)
 		return fmt.Sprintf("GA1.2.%d.%d", rand.Int63n(999999999), time.Now().Unix()-rand.Int63n(86400*7))
@@ -224,8 +266,13 @@ func GenerateRealisticCookieValue(cookieName string) string {
 	case "session_id", "sessionid":
 		return GenerateRealisticSessionID()
 	default:
-		// Standard generic cookie value
-		return RandomString(20)
+		// Standard generic cookie value (alphanumeric only)
+		const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+		var sb strings.Builder
+		for i := 0; i < 20; i++ {
+			sb.WriteByte(charset[rand.Intn(len(charset))])
+		}
+		return sb.String()
 	}
 }
 
