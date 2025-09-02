@@ -797,7 +797,6 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 		dntProb := float32(0.15) // DNT is less common now
 		cacheControlProb := float32(0.05) // Cache-Control is rare in normal browsing
 		refererProb := float32(0.85) // Most requests have referrer
-		connectionProb := float32(0.95) // Almost all browsers send Connection header
 		
 		if proxyInfo != nil {
 			// ปรับความน่าจะเป็นตาม TimingProfile
